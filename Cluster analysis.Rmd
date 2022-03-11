@@ -1,0 +1,65 @@
+---
+title: "Cluster Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(cluster)
+library(tidyverse)
+library(factoextra)
+```
+
+
+```{r analysis}
+df<-USArrests
+df<-na.omit(df)
+df<-scale(df)
+head(df)
+
+distance<-get_dist(df)
+
+fviz_dist(distance,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+k2<-kmeans(df,centers = 5,nstart = 25)
+str(k2)
+fviz_cluster(k2,data=df)
+
+set.seed(123)
+
+wss<-function(k) {
+  kmeans(df,k,nstart=10)$tot.withinss
+}
+
+k.values<-1:15
+
+wss_values<-map_dbl(k.values,wss)
+
+plot(k.values,wss_values,
+     type="b",pch=19,frame=FALSE,
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+
+fviz_nbclust(df,kmeans,method="wss")
+
+fviz_nbclust(df,kmeans,method="silhouette")
+
+gap_stat <- clusGap(df, FUN = kmeans, nstart = 25,
+                    K.max = 10, B = 50)
+
+fviz_gap_stat(gap_stat)
+
+final <- kmeans(df, 4, nstart = 25)
+
+fviz_cluster(final, data = df)
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
