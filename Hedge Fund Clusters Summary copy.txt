@@ -1,0 +1,291 @@
+---
+title: "Hedge Fund Clusters Summary"
+author: "James Walsh"
+date: "5/8/2022"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+Cluster analysis is an unsupervised learning methodology within machine learning. The approach is straight-forward, it attempts to look for, or learn clusters in data based on a definition of distance between key characteristics. In this analysis the Euclidean distance is used, which is the squared distance between normalized characteristics. One of the neat features of this is that you can consider multiple dimension, e.g. go beyond risk and return to incorporate beta, skew etc.
+
+There are a number of reasons why understanding the similarity and differences between strategies may be of interest.
+
+1.  When building portfolios there is often a practical limitation on the number of funds or investments that can be incorporated in a portfolio. By understanding which strategies are indeed similar we can narrow the number of possible strategies.
+
+2.  Clustering takes into account not only the systematic characteristics of a strategy, but also the idiosyncratic returns.
+
+3.  Clusters may change over time, and this is interesting to understand.
+
+Another benefit of this approach is it doesn't require require that a number of clusters is pre-specified, rather they are revealed by the data depending on the characteristics in the data that are deemed important.
+
+Finally, there are different ways of defining clusters and algorithms to find them, so there is no 'correct' solution, and it will depend on multiple considerations. Also, like all good analysis it begs its own additional questions, e.g. which characteristics are important, over what time period, should they be normalized, etc.
+
+```{r setup, include=FALSE}
+library(cluster)
+library(tidyverse)
+library(factoextra)
+library(dendextend)
+library(moments)
+library(dplyr)
+library(NbClust)
+
+load("HedgeRS_EW.RData")
+attach(HedgeRSReturns.t)
+
+end_date<-last(HedgeRSReturns.t$date)
+start_date<-first(HedgeRSReturns.t$date)
+```
+
+```{r functions, echo=FALSE}
+
+#This calculates stress beta using APP_Equity
+stressbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = stress.t)
+    summary(fit)$coefficients[2]
+}
+##This calculates the beta
+beta<-function(x){
+  fit<-lm(x~APP_Equity,data=Hedge_data.t)
+  x<-summary(fit)$coefficients[2]
+}
+
+
+```
+
+### Statistics used in cluster analysis
+
+In this analysis I have chosen to use HedgeRS Equally Weighted from January 2007 through July 2021. The characteristics on which the analysis is carried out are set out below. Note, the variable 'Stress' is the Stress Beta, or equity beta (APP Equity) when the VIX is at least 1 standard deviation above its mean.
+
+```{r dataprep,echo=FALSE}
+c<-length(HedgeRSReturns.t)-9
+columns<-c(2:c)
+
+#reduce to desired time period
+
+rows<-c(38:nrow(HedgeRSReturns.t))
+Hedge_data.t<-select(HedgeRSReturns.t,-HedgeRS_EW,-Multi_EW)
+Hedge_data.t<-Hedge_data.t[rows,]
+
+#Create states
+z <- Hedge_data.t$VIX #load VIX into z
+score <- (z-mean(z, na.rm = TRUE))/sd(z, na.rm = TRUE) #calculate z score
+
+Hedge_data.t<-cbind(Hedge_data.t,score) #add z score to the data.table
+
+Hedge_data.t$state<-"Central" #create new column based on score - named as state
+Hedge_data.t$state[score>=1]<-"High"
+Hedge_data.t$state[score<=1]<-"Low"
+
+
+##Create stressed subset
+stress.t<-Hedge_data.t%>%
+filter(state=="High")
+#Calculate the stats
+
+HF_beta<-sapply(Hedge_data.t[,columns],beta)
+HF_sd<-sapply(Hedge_data.t[,columns],sd)*(12^0.5)
+HF_mean<-sapply(Hedge_data.t[,columns],mean)*12
+HF_skew<-sapply(Hedge_data.t[,columns],skewness)
+HF_kurt<-sapply(Hedge_data.t[,columns],kurtosis)
+Sharpe<-(HF_mean-(mean(Hedge_data.t$Cash)*12))/HF_sd
+Treynor<-(HF_mean-(mean(Hedge_data.t$Cash)*12))/HF_beta
+Stress<-sapply(stress.t[,columns],stressbeta)
+```
+
+```{r cluster_data,echo=FALSE}
+#df<-cbind(HF_sd,HF_mean,HF_skew,HF_kurt,HF_beta,Sharpe,Treynor,Stress)
+df_base<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Stress)
+#df_base<-cbind(HF_mean,HF_sd)
+
+HF_names<-c("CTA","EM GM","GAA","Global Macro","Insurance","L/S Asia Pac",
+            "LS Emerging","LS Europe","LS Global","LS Japan","LS US",
+            "Activist","Distressed","EM FI","Risk Arb","CB Arb",
+            "RV Credit","RV FI","FEMN","QEMN","Stat Arb","Structured Credit",
+            "Multi Event","Multi RV","Multi Diversified","Multi Opportunistic")
+
+row.names(df_base)<-HF_names
+df_base_round<-round(df_base,3)
+df_base_round
+df<-na.omit(df_base)
+df<-scale(df)
+
+```
+
+### Euclidian Distance
+
+The Euclidian Distance is the square root of the sum of the squared distance from each other based on the above characteristics. A number of close to 0 implies they are similar, and a high number suggests they are very different.
+
+```{r distance, echo=FALSE}
+
+set.seed(123)
+distance<-get_dist(df,method="euclidean")
+fviz_dist(distance,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+```
+
+### Cluster illustration
+
+These charts show how strategies would be clustered based on 3 to 10 clusters. The x and y values are derived from PCA, or Principle Component Analysis, of all the characteristcs. The x and y axis labels show the percentage of variation that can be explained by these first two components. These clusters are derived by the k-means methodology, which finds the centres of cluster based on the number of clusters that is pre-defined.
+
+```{r create_clusters,echo=FALSE,message=FALSE,warning=FALSE}
+
+k2<-kmeans(df,centers = 3,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 3 clusters")
+
+k2<-kmeans(df,centers = 4,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 4 clusters")
+
+k2<-kmeans(df,centers = 5,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 5 clusters")
+
+k2<-kmeans(df,centers = 6,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 6 clusters")
+
+k2<-kmeans(df,centers = 7,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 7 clusters")
+
+k2<-kmeans(df,centers = 8,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 8 clusters")
+
+k2<-kmeans(df,centers = 9,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 9 clusters")
+
+k2<-kmeans(df,centers = 10,nstart = 25)
+fviz_cluster(k2,data=df,main="K means based on 10 clusters")
+```
+
+### Cluster stats
+
+Below are the summary stats and classification for 3 and 10 clusters
+
+```{r clusters_stats, echo=FALSE,message=FALSE}
+
+k2<-kmeans(df,3,nstart = 25)
+fviz_cluster(k2,data=df,
+             palette=c("#2E9FDF","#00AFBB","#E7B800","#FC4E07"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+k2<-kmeans(df,3,nstart = 25)
+k2_results<-aggregate(df_base,by=list(clusters=k2$cluster),mean)
+round(k2_results,3)
+k2_results<-aggregate(df_base,by=list(clusters=k2$cluster),mean)
+cluster<-k2$cluster
+results<-cbind(df_base,cluster)
+results.df<-as.data.frame(results)
+round(results.df[order(results.df$cluster),],3)
+
+k2<-kmeans(df,10,nstart = 25)
+fviz_cluster(k2,data=df,
+             palette=c("#1B9E77","#D95F02","#7570B3","#E7298A","#66A61E","#E6AB02","#A6761D","#FF66B2",
+                       "#FF0000","#CC0066"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+k2<-kmeans(df,10,nstart = 25)
+k2_results<-aggregate(df_base,by=list(clusters=k2$cluster),mean)
+round(k2_results,3)
+k2_results<-aggregate(df_base,by=list(clusters=k2$cluster),mean)
+cluster<-k2$cluster
+results<-cbind(df_base,cluster)
+results.df<-as.data.frame(results)
+round(results.df[order(results.df$cluster),],3)
+
+```
+
+### Clusters compared to more common characteristics
+
+Instead of comparing the clusters again the principal components, it is also interesting to compare the clusters against explicit characteristics. In the charts below, the colours represent the clusters, and the strategies are plotted against more common characteristics. These are shown based on 3 and 10 clusters.
+
+```{r clusters_by_characteristics, echo=FALSE,message=FALSE}
+
+k2<-kmeans(df,3,nstart = 25)
+
+df_base %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(HF_sd, HF_mean, color = factor(cluster), label = state,)) +
+  ggtitle("Strategies plotted by cluster on risk v return axis")+
+  labs(x="Standard Deviation",y="Return")+
+  geom_text()
+
+df_base %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(Sharpe, HF_beta, color = factor(cluster), label = state)) +
+   ggtitle("Strategies plotted by cluster on Sharpe v Equity beta axis")+
+  labs(x="Sharpe Ratio",y="Equity beta")+
+  geom_text()
+
+df_base %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(HF_mean, Stress, color = factor(cluster), label = state)) +
+   ggtitle("Strategies plotted by cluster on Return v Stress Beta axis")+
+  labs(x="Return",y="Stress Beta (beta on >=1sd VIX)")+
+  geom_text()
+
+k2<-kmeans(df,10,nstart = 25)
+
+df_base %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(HF_sd, HF_mean, color = factor(cluster), label = state,)) +
+  ggtitle("Strategies plotted by cluster on risk v return axis")+
+  labs(x="Standard Deviation",y="Return")+
+  geom_text()
+
+df_base %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(Sharpe, HF_beta, color = factor(cluster), label = state)) +
+   ggtitle("Strategies plotted by cluster on Sharpe v Equity beta axis")+
+  labs(x="Sharpe Ratio",y="Equity beta")+
+  geom_text()
+
+df_base %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(HF_mean, Stress, color = factor(cluster), label = state)) +
+   ggtitle("Strategies plotted by cluster on Return v Stress Beta axis")+
+  labs(x="Return",y="Stress Beta (beta on >=1sd VIX)")+
+  geom_text()
+```
+
+### Optimal number of clusters
+
+So far the number of clusters has been imposed. Here we look at what the data says about the number of clusters. The first metric is the total sum of squares within each cluster. As the number of clusters increases, the sum of squares will fall, reaching zero once the number of clusters equals the number of strategies. What we are looking for is an 'elbow' point, where the sum of squares stops falling notably. While the sharpest decline comes between 1 and 3 clusters, the last sharp drop is at 7, suggesting that is the appropriate number of clusters.
+
+```{r k_mean_optimal_clusters_wss,echo=FALSE}
+
+set.seed(123)
+fviz_nbclust(df,kmeans,method="wss",k.max = 20)
+```
+
+A different metric, the silhouette measure, takes into account not just how close the data points are within each cluster, but also how far the clusters are from each other. On this metric the optimal number is 10, but this is only slightly better than 3, hence the use of both in this write-up.
+
+```{r k_mean_optimal_clusters_silhouette,echo=FALSE}
+set.seed(123)
+fviz_nbclust(df,kmeans,method="silhouette",k.max=20)
+
+```
+
+### Conclusions and future analysis
+
+This work is not designed to conclude what are true clusters, but to explore how we might think about them. What is interesting is how the data splits into a few clusters, and then rather more, fitting in with a super strategy clustering and perhaps a more narrow clustering.
+
+Future questions include: what time period should be used, and indeed to the clusters change over time; which characteristics should be included; should multi-strats be included or excluded.

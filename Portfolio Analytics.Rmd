@@ -9,39 +9,136 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(PerformanceAnalytics)
 library(xts)
+library(tidyverse)
+library(tidyquant)
+library(riskParityPortfolio)
 load("HedgeRS_EW.RData")
 attach(HedgeRSReturns.t)
 
 ```
 
-
-```{r data_setup}
+```{r data_setup, echo=FALSE}
 hedgeData<-HedgeRSReturns.t[,1:29]
 head(hedgeData)
+
+cash<-HedgeRSReturns.t[,c(1,36)]
+cash$date<-as.Date(cash$date)
+cash.ts<-xts(cash[,-1],cash$date)
+head(cash.ts)
+
+equity<-HedgeRSReturns.t[,c(1,30)]
+equity$date<-as.Date(equity$date)
+equity.ts<-xts(equity[,-1],equity$date)
+head(equity.ts)
+
+#Select all 20 strategies
+hedgeData<-hedgeData %>% select(date,CTA_EW,GAA_EW,Global_Macro_EW,Insurance,
+                                LS_AsiaPacific_EW,LS_Emerging_EW,LS_Europe_EW,LS_Japan_EW,LS_US_EW,
+                                Activist_EW,Distressed_EW,EM_FI_EW,Risk_Arb_EW,CB_Arb_EW,
+                                RV_Credit_EW,RV_FI_EW,FEMN_EW,QEMN_EW,Stat_Arb_EW,
+                                Struct_Credit_EW)
+
+head(hedgeData)
+
+#convert to timeseries
 hedgeData$date<-as.Date(hedgeData$date)
 hedgeData.ts<-xts(hedgeData[,-1],hedgeData$date)
 head(hedgeData.ts)
 R<-hedgeData.ts
 N<-ncol(hedgeData.ts)
+
+#equally weighted
+weights = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
+colnames(weights) = colnames(R)
+#weights
+
+#create portfolio returns
+#portfolioReturns<-Return.portfolio(R,rebalance_on = "quarters")
+
+#portfolio results
+#table.Stats(portfolioReturns)
+#table.AnnualizedReturns(portfolioReturns)
+#table.CalendarReturns(portfolioReturns)
+#table.Drawdowns(portfolioReturns)
+#table.Distributions(portfolioReturns)
+#ES(portfolioReturns,p=0.95)
+
+
+Return.annualized(portfolioReturns,geometric = TRUE)
+StdDev.annualized(portfolioReturns)
+
+
+Return.annualized(portfolioReturns)
+StdDev.annualized(portfolioReturns)
+ES(portfolioReturns)
+cat('Skew',skewness(portfolioReturns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
+SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
+table.Drawdowns(portfolioReturns)
+```
+
+## Equal Weighted
+
+```{r equal_weighted_all,echo=FALSE}
+
+
+#1/N weighting
 weights = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
 colnames(weights) = colnames(R)
 weights
-portfolioReturns<-Return.portfolio(R)
-table.Stats(portfolioReturns)
-table.AnnualizedReturns(portfolioReturns)
-table.CalendarReturns(portfolioReturns)
+
+#create portfolio returns
+portfolioReturns<-Return.portfolio(R,weights = weights,rebalance_on = "quarters")
+
+Return.annualized(portfolioReturns)
+StdDev.annualized(portfolioReturns)
+ES(portfolioReturns)
+cat('Skew',skewness(portfolioReturns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
+SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
 table.Drawdowns(portfolioReturns)
-table.Distributions(portfolioReturns)
 
-```
-
-```{r equal_weighted_all}
-
-#1/N portfolio
 #equal risk contribution
 
 ```
 
+## Risk Parity (equal risk weighted)
+
+```{r riskParity,echo=FALSE}
+corR<-cor(R)
+riskParityPortfolio(corR)
+riskParity<-riskParityPortfolio(corR)
+riskParity.w<-riskParity$w
+
+riskParity.w
+
+weights = xts(t(riskParity.w), as.Date("2003-12-31"))
+
+#colnames(weights) = colnames(R)
+weights
+
+portfolioReturns<-Return.portfolio(R,weights = riskParity.w,rebalance_on = "quarters")
+
+Return.annualized(portfolioReturns)
+StdDev.annualized(portfolioReturns)
+ES(portfolioReturns)
+cat('Skew',skewness(portfolioReturns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
+SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
+table.Drawdowns(portfolioReturns)
+
+
+
+```
 
 ```{r optimized_all}
 
@@ -55,12 +152,10 @@ table.Distributions(portfolioReturns)
 
 ```
 
-
 ```{r cluster_MVO_level_1}
 
 
 ```
-
 
 ```{r cluster_MVO_level_2}
 
