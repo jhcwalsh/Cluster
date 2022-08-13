@@ -1,0 +1,486 @@
+---
+title: "Hedge Fund Clusters"
+author: "James Walsh"
+date: "5/7/2022"
+output: html_document
+---
+
+Cluster analysis is an unsupervised learning methodology within machine learning. The approach is straight-forward, it attempts to look for clusters in data based on a definition of distance between key characteristics. In this analysis the Euclidean distance is used, which is the squared distance between normalized characteristics. The characteristics are shown in the table below.
+
+There are a number of reasons why understanding the similarity and differences between strategies may be of interest.
+
+1.  When building portfolios there is often a practical limitation on the number of funds or investments that can be incorporated in a portfolio. By understanding which strategies are indeed similar we can narrow the number of possible strategies.
+
+2.  Similarities can change over time.
+
+3.  Clustering takes into account not only the systematic characteristics of a strategy, but also the idiosyncratic returns.
+
+Another benefit of this approach is it doesn't require require that a number of clusters is pre-specified, rather they are revealed by the data depending on the characteristics in the data that are deemed important.
+
+```{r setup, include=FALSE}
+library(cluster)
+library(tidyverse)
+library(factoextra)
+library(dendextend)
+library(moments)
+library(dplyr)
+library(NbClust)
+library(pheatmap)
+library(tidyquant)
+library(PortfolioAnalytics)
+library(PerformanceAnalytics)
+
+load("HedgeRS_EW.RData")
+attach(HedgeRSReturns.t)
+
+end_date<-last(HedgeRSReturns.t$date)
+start_date<-first(HedgeRSReturns.t$date)
+```
+
+```{r functions, echo=FALSE}
+
+#This calculates stress beta using APP_Equity
+stressbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = stress.t)
+    summary(fit)$coefficients[2]
+}
+##This calculates the beta
+beta<-function(x){
+  fit<-lm(x~APP_Equity,data=Hedge_data.t)
+  x<-summary(fit)$coefficients[2]
+}
+
+
+```
+
+### Statistics used in cluster analysis
+
+Time period: December 2003 - July 2021 Data: HedgeRS Equally Weighted
+
+```{r dataprep,echo=FALSE}
+c<-length(HedgeRSReturns.t)-9
+columns<-c(2:c)
+
+#reduce to desired time period
+
+rows<-c(1:nrow(HedgeRSReturns.t))
+Hedge_data.t<-select(HedgeRSReturns.t,-HedgeRS_EW,-Multi_EW)
+Hedge_data.t<-Hedge_data.t[rows,]
+
+#Create states
+z <- Hedge_data.t$VIX #load VIX into z
+score <- (z-mean(z, na.rm = TRUE))/sd(z, na.rm = TRUE) #calculate z score
+
+Hedge_data.t<-cbind(Hedge_data.t,score) #add z score to the data.table
+
+Hedge_data.t$state<-"Central" #create new column based on score - named as state
+Hedge_data.t$state[score>=1]<-"High"
+Hedge_data.t$state[score<=1]<-"Low"
+
+
+##Create stressed subset
+stress.t<-Hedge_data.t%>%
+filter(state=="High")
+#Calculate the stats
+
+HF_beta<-sapply(Hedge_data.t[,columns],beta)
+HF_sd<-sapply(Hedge_data.t[,columns],sd)*(12^0.5)
+HF_mean<-sapply(Hedge_data.t[,columns],mean)*12
+HF_skew<-sapply(Hedge_data.t[,columns],skewness)
+HF_kurt<-sapply(Hedge_data.t[,columns],kurtosis)
+Sharpe<-(HF_mean-(mean(Hedge_data.t$Cash)*12))/HF_sd
+Treynor<-(HF_mean-(mean(Hedge_data.t$Cash)*12))/HF_beta
+Stress<-sapply(stress.t[,columns],stressbeta)
+```
+
+```{r cluster_data,echo=FALSE}
+#df<-cbind(HF_sd,HF_mean,HF_skew,HF_kurt,HF_beta,Sharpe,Treynor,Stress)
+df_base<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Stress)
+#df_base<-cbind(HF_mean,HF_sd)
+
+HF_names<-c("CTA","EM GM","GAA","Global Macro","Insurance","L/S Asia Pac",
+            "LS Emerging","LS Europe","LS Global","LS Japan","LS US",
+            "Activist","Distressed","EM FI","Risk Arb","CB Arb",
+            "RV Credit","RV FI","FEMN","QEMN","Stat Arb","Structured Credit",
+            "Multi Event","Multi RV","Multi Diversifited","Multi Opportunistic")
+
+row.names(df_base)<-HF_names
+df_base_round<-round(df_base,3)
+df_base_round
+df<-na.omit(df_base)
+df<-scale(df)
+
+```
+
+### Euclidian Distance
+
+The Euclidian Distance is the squared distance from each other based on the above characteristics. A number of close to 0 implies they are similar, and a high number suggests they are very different.
+
+```{r distance, echo=FALSE}
+#distance1<-get_dist(df,method="pearson")
+#fviz_dist(distance1,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+#distance2<-get_dist(df,method = "kendall")
+#fviz_dist(distance2,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+#distance3<-get_dist(df,method = "spearman")
+#fviz_dist(distance3,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+#distance4<-get_dist(df,method = "manhattan")
+#fviz_dist(distance4,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+set.seed(1)
+distance<-get_dist(df,method="euclidean")
+fviz_dist(distance,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+```
+
+### Cluster illustration
+
+These charts show how strategies would be clustered based on 3 to 8 clusters. The x and y values are derived from PCA, or Principle Component Analysis, of all the characteristcs, and show the percentage of variation that can be explained by these first two components.
+
+```{r create_clusters,echo=FALSE,message=FALSE,warning=FALSE}
+
+k2<-kmeans(df,centers = 3,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,3,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 4,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,4,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 5,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,5,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 6,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,6,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 7,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,7,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 8,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,8,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 9,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,9,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 10,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,10,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 11,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,11,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+k2<-kmeans(df,centers = 12,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+k2<-pam(df,12,nstart = 25)
+fviz_cluster(k2,data=df, main="Clustering around Medoids")
+
+
+```
+
+These charts show specific characteristics of the strategies with the clusters identified by colour
+
+```{r clusters_by_characteristics, echo=FALSE,message=FALSE}
+k2<-kmeans(df,8,nstart = 25)
+fviz_cluster(k2,data=df)
+
+k2_results<-aggregate(df_base,by=list(clusters=k2$cluster),mean)
+k2_results
+
+k2<-pam(df,k = 8,nstart = 25)
+fviz_cluster(k2,data=df)
+
+k2_results<-aggregate(df_base,by=list(clusters=k2$cluster),mean)
+k2_results
+
+k2$clustering
+
+results<-cbind(df_base,k2$clustering)
+
+results
+
+
+df %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(HF_sd, HF_mean, color = factor(cluster), label = state,)) +
+  ggtitle("Strategies plotted by cluster on risk v return axis")+
+  labs(x="Standard Deviation",y="Return")+
+  geom_text()
+
+df %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(Sharpe, HF_beta, color = factor(cluster), label = state)) +
+   ggtitle("Strategies plotted by cluster on Sharpe v Equity beta axis")+
+  labs(x="Sharpe Ratio",y="Equity beta")+
+  geom_text()
+
+df %>%
+  as_tibble() %>%
+  mutate(cluster = k2$cluster,
+         state = row.names(df)) %>%
+  ggplot(aes(HF_mean, Stress, color = factor(cluster), label = state)) +
+   ggtitle("Strategies plotted by cluster on Return v Stress Beta axis")+
+  labs(x="Return",y="Stress Beta (beta on >=1sd VIX")+
+  geom_text()
+
+k2<-kmeans(df,3,nstart = 25)
+fviz_cluster(k2,data=df,
+             palette=c("#2E9FDF","#00AFBB","#E7B800","#FC4E07"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+k2<-kmeans(df,4,nstart = 25)
+fviz_cluster(k2,data=df,
+             palette=c("#2E9FDF","#00AFBB","#E7B800","#FC4E07"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+k2<-pam(df,7,nstart = 25)
+fviz_cluster(k2,data=df,
+             palette=c("#1B9E77","#D95F02","#7570B3","#E7298A","#66A61E","#E6AB02","#A6761D"),
+             ellipse.type="euclid",
+             star.plot=TRUE,
+             repel=TRUE,
+             ggtheme=theme_minimal()
+)
+
+
+```
+
+### Optimal number of clusters - various methods
+
+```{r k_mean_optimal_clusters,echo=FALSE}
+
+set.seed(123)
+
+wss<-function(k) {
+  kmeans(df,k,nstart=10)$tot.withinss
+}
+
+k.values<-1:20
+
+wss_values<-map_dbl(k.values,wss)
+
+plot(k.values,wss_values,
+     type="b",pch=19,frame=FALSE,
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+
+fviz_nbclust(df,kmeans,method="wss")
+
+fviz_nbclust(df,kmeans,method="silhouette")
+
+gap_stat <- clusGap(df, FUN = kmeans, nstart = 12, d.power=2,
+                    K.max = 20, B = 200)
+
+fviz_gap_stat(gap_stat)
+```
+```{r pam_optimal_clusters,echo=FALSE}
+
+fviz_nbclust(df,kmeans,method = "silhouette")+ggtitle("k-means clusters")+
+  theme_classic()
+fviz_nbclust(df,pam,method = "silhouette")+ggtitle("Medoids clusters")+
+  theme_classic()
+
+fviz_nbclust(df,kmeans,method = "wss")+ggtitle("k-means clusters")+
+  theme_classic()
+fviz_nbclust(df,pam,method = "wss")+ggtitle("Medoids clusters")+
+  theme_classic()
+
+
+fviz_nbclust(df,kmeans,nstart=25,method = c("gap_stat"),nboot=100)+
+  ggtitle("k-means")+theme_classic()
+fviz_nbclust(df,pam,nstart=25,method = c("gap_stat"),nboot=100)+
+  ggtitle("Medoids clusters")+theme_classic()
+
+nb<-NbClust(df,distance="euclidean",min.nc=2,max.nc=12,method="centroid")
+fviz_nbclust(nb)+ggtitle("centroids")
+
+nb<-NbClust(df,distance="euclidean",min.nc=2,max.nc=12,method="kmeans")
+fviz_nbclust(nb)+ggtitle("kmeans")
+```
+
+## Hierarchical Clustering
+
+```{r hierarchical_clustering, echo=FALSE}
+
+clusters<-hclust(distance)
+plot(clusters)
+
+clusters<-agnes(distance,method = "complete")
+plot(clusters)
+
+# methods to assess
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+# function to compute coefficient
+ac <- function(x) {
+  agnes(df, method = x)$ac
+}
+
+map_dbl(m, ac)
+
+clusters<-agnes(distance,method = "ward")
+plot(clusters)
+
+
+# compute divisive hierarchical clustering
+hc4 <- diana(df)
+
+# Divise coefficient; amount of clustering structure found
+hc4$dc
+## [1] 0.8514345
+
+# plot dendrogram
+pltree(hc4, cex = 0.6, hang = -1, main = "Dendrogram of diana")
+
+# Ward's method
+hc5 <- hclust(distance, method = "ward.D2" )
+
+# Cut tree into 4 groups
+sub_grp <- cutree(hc5, k = 6)
+
+# Number of members in each cluster
+table(sub_grp)
+
+# Compute distance matrix
+res.dist <- dist(df, method = "euclidean")
+
+# Compute 2 hierarchical clusterings
+hc1 <- hclust(res.dist, method = "complete")
+hc2 <- hclust(res.dist, method = "ward.D2")
+
+# Create two dendrograms
+dend1 <- as.dendrogram (hc1)
+dend2 <- as.dendrogram (hc2)
+
+tanglegram(dend1, dend2)
+
+dend_list <- dendlist(dend1, dend2)
+
+tanglegram(dend1, dend2,
+  highlight_distinct_edges = FALSE, # Turn-off dashed lines
+  common_subtrees_color_lines = FALSE, # Turn-off line colors
+  common_subtrees_color_branches = TRUE, # Color common branches 
+  main = paste("entanglement =", round(entanglement(dend_list), 2))
+  )
+
+fviz_dend(hc1,cex=0.5,k=8,k_colors="jco",type="circular")
+
+```
+
+
+```{r correlation_clustering}
+cor_matrix<-cor(HedgeRSReturns.t[,2:29])
+head(cor_matrix)
+cor_matrix_dist<-as.dist(cor_matrix)
+cor_matrix_dist
+fviz_dist(cor_matrix_dist,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+df.corr<-scale(cor_matrix_dist)
+
+fviz_nbclust(df.corr,kmeans,method="wss")
+
+fviz_nbclust(df.corr,kmeans,method="silhouette")
+
+gap_stat <- clusGap(df.corr , FUN = kmeans, nstart = 12, d.power=2,
+                    K.max = 20, B = 200)
+
+fviz_gap_stat(gap_stat)
+
+k2<-kmeans(df.corr,centers = 3,nstart = 25)
+fviz_cluster(k2,data=df.corr,main="K means")
+
+k2<-pam(df.corr,3,nstart = 25)
+fviz_cluster(k2,data=df.corr, main="Clustering around Medoids")
+
+
+
+```
+
+
+
+```{r portfolios}
+funds<-colnames(HedgeRSReturns.t[2:29])
+HedgeRSReturns.ts<-ts(HedgeRSReturns.t[2:29])
+
+return_target<-0.06
+
+init <- portfolio.spec(assets=funds) #include insurance
+init <- add.constraint(portfolio=init,type="full_investment")
+#init <- add.constraint(portfolio = init, type="return", return_target=return_target/12)
+
+min_weights=c(rep(0,length(funds)))
+max_weights=c(rep(1,length(funds)))
+init <- add.constraint(portfolio=init, type="box", min=min_weights, max=max_weights)
+minvar <- add.objective(portfolio=init,type="return",name="mean")
+minvar.mv<-add.objective(portfolio=init,type="risk",name="StdDev")
+minvar.sd <- add.objective(portfolio=init, type="risk", name="StdDev")
+minvar.ed <- add.objective(portfolio=init, type="risk", name="ETL",arguments=list(p=0.95),enabled=TRUE)
+minvar.sd.30 <- add.objective(portfolio=init, type="risk_budget", name="StdDev",max_prisk=0.2)
+minvar.ed.30 <- add.objective(portfolio=init, type="risk_budget", name="ETL",p=0.95,max_prisk=0.2,enabled=TRUE)
+minvar.equal.risk<-add.objective(portfolio=init,type="risk_budget",name="ETL",p=0.95,min_concentration=TRUE,enabled=TRUE)
+
+opt_minvar.sd<-optimize.portfolio(R=HedgeRSReturns.ts,portfolio = minvar.sd,optimize_method = "ROI",trace = TRUE)
+opt_minvar.sd
+opt_minvar.mv<-optimize.portfolio(R=HedgeRSReturns.ts,portfolio = minvar.mv,optimize_method = "ROI",trace = TRUE)
+opt_minvar.mv
+opt_minvar.ed<-optimize.portfolio(R=HedgeRSReturns.ts,portfolio = minvar.ed,optimize_method = "ROI",trace = TRUE)
+opt_minvar.ed
+opt_minvar.sd.30<-optimize.portfolio(R=HedgeRSReturns.ts,portfolio = minvar.sd.30,optimize_method = "ROI",trace = TRUE)
+opt_minvar.sd.30
+opt_minvar.ed.30<-optimize.portfolio(R=HedgeRSReturns.ts,portfolio = minvar.ed.30,optimize_method = "ROI",trace = TRUE)
+opt_minvar.ed.30
+opt_minvar.equal.risk<-optimize.portfolio(R=HedgeRSReturns.ts,portfolio = minvar.equal.risk,optimize_method = "ROI",trace = TRUE)
+opt_minvar.equal.risk
+
+cluster1<-HedgeRSReturns.t$CTA_EW
+cluster2<-cbind(HedgeRSReturns.t$GAA_EW,HedgeRSReturns.t$QEMN_EW,HedgeRSReturns.t$Global_Macro_EW,HedgeRSReturns.t$Stat_Arb_EW,
+                HedgeRSReturns.t$Risk_Arb_EW,HedgeRSReturns.t$FEMN_EW)
+colnames(cluster2)<-c()
+cluster3<-cbind(HedgeRSReturns.t$LS_Europe_EW,HedgeRSReturns.t$RV_Credit_EW,HedgeRSReturns.t$Multi_Opp_EW,HedgeRSReturns.t$Multi_Event_EW,
+                HedgeRSReturns.t$LS_Japan_EW)
+
+
+funds<-colnames(cluster2)
+
+cluster2<-Hedge_data.t %>%
+  select(GAA_EW,QEMN_EW,Global_Macro_EW,Stat_Arb_EW,Risk_Arb_EW,FEMN_EW)
+
+
+```
+

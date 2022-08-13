@@ -9,7 +9,7 @@ library(tidyverse)
 library(factoextra)
 ```
 
-
+##Euclidean Distance
 ```{r analysis}
 df<-USArrests
 df<-na.omit(df)
