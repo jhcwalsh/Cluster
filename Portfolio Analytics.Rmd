@@ -14,16 +14,15 @@ library(tidyquant)
 library(riskParityPortfolio)
 library(PortfolioAnalytics)
 
-attach(HedgeRSReturns.t)
 load("HedgeRS_EW.RData")
+attach(HedgeRSReturns.t)
+
 
 
 ```
 
 ```{r data_setup, echo=FALSE}
 hedgeData<-HedgeRSReturns.t[,1:29]
-#head(hedgeData)
-#summary(hedgeData)
 
 cash<-HedgeRSReturns.t[,c(1,36)]
 cash$date<-as.Date(cash$date)
@@ -51,13 +50,16 @@ hedgeData.ts<-xts(hedgeData[,-1],hedgeData$date)
 R<-hedgeData.ts
 N<-ncol(hedgeData.ts)
 
-#equally weighted
-weights = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
-colnames(weights) = colnames(R)
+#equally weighted - buy and hold
+equal.weights.bh = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
+colnames(equal.weights.bh) = colnames(R)
+
+equal.weights<-as.vector(matrix(equal.weights.bh,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
 #weights
 
 #create portfolio returns
-portfolioReturns<-Return.portfolio(R,weights=weights,rebalance_on = "quarters")
+portfolioReturns<-Return.portfolio(R,weights=equal.weights.bh,rebalance_on = "quarters")
 
 #portfolio results
 #table.Stats(portfolioReturns)
@@ -85,7 +87,7 @@ table.Drawdowns(portfolioReturns)
 
 ## Equal Weighted
 
-```{r equal_weighted_all,echo=FALSE}
+```{r equal_weighted_all, echo=FALSE}
 
 
 #1/N weighting
@@ -93,19 +95,23 @@ weights = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
 colnames(weights) = colnames(R)
 weights
 
-#create portfolio returns
-portfolioReturns<-Return.portfolio(R,weights = weights,rebalance_on = "quarters")
+equal.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
 
-Return.annualized(portfolioReturns,geometric = TRUE)
-StdDev.annualized(portfolioReturns)
-ES(portfolioReturns)
-cat('Skew',skewness(portfolioReturns))
-cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
-SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
-cat('beta',CAPM.beta(portfolioReturns,equity.ts))
-cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
-cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
-table.Drawdowns(portfolioReturns)
+#create portfolio returns
+portfolioReturns<-Return.portfolio(R,weights = equal.weights,rebalance_on = "quarters",verbose = TRUE)
+
+head(portfolioReturns$BOP.Weight)
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
 
 #equal risk contribution
 
@@ -123,23 +129,26 @@ riskParity.w
 
 weights = xts(t(riskParity.w), as.Date("2003-12-31"))
 
+risk.parity.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
 
 #colnames(weights) = colnames(R)
-weights
 
-portfolioReturns<-Return.portfolio(R,weights=weights,rebalance_on = "quarters",verbose=TRUE)
-portfolioReturns$BOP.Weight
+portfolioReturns<-Return.portfolio(R,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
 
-Return.annualized(portfolioReturns)
-StdDev.annualized(portfolioReturns)
-ES(portfolioReturns)
-cat('Skew',skewness(portfolioReturns))
-cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
-SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
-cat('beta',CAPM.beta(portfolioReturns,equity.ts))
-cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
-cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
-table.Drawdowns(portfolioReturns)
+head(portfolioReturns$BOP.Weight)
+
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE)
+Return.annualized(portfolioReturns$returns,geometric = FALSE)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
 
 
 
@@ -161,28 +170,26 @@ opt_mvo<-optimize.portfolio(R=returns,portfolio=portfolio,
 
 opt_mvo
 
-names(opt_mvo)
-
-wMVO<-opt_mvo$weights
-wMVO
-
-weights = xts(t(wMVO), as.Date("2003-12-31"))
-
-#colnames(weights) = colnames(R)
+weights<-opt_mvo$weights
 weights
 
-portfolioReturns<-Return.portfolio(R=R,weights = weights,rebalance_on = "none",verbose = TRUE)
-Return.annualized(portfolioReturns,geometric = TRUE,scale=12)
-Return.annualized(portfolioReturns,geometric = FALSE,scale=12)
-StdDev.annualized(portfolioReturns)
-ES(portfolioReturns)
-cat('Skew',skewness(portfolioReturns))
-cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
-SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
-cat('beta',CAPM.beta(portfolioReturns,equity.ts))
-cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
-cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
-table.Drawdowns(portfolioReturns)
+MVO.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
+portfolioReturns<-Return.portfolio(R=R,weights = MVO.weights,rebalance_on = "quarters",verbose = TRUE)
+
+head(portfolioReturns$BOP.Weight)
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE,scale=12)
+Return.annualized(portfolioReturns$returns,geometric = FALSE,scale=12)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
 
 ```
 
