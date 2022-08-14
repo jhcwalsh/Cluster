@@ -12,24 +12,28 @@ library(xts)
 library(tidyverse)
 library(tidyquant)
 library(riskParityPortfolio)
-load("HedgeRS_EW.RData")
+library(PortfolioAnalytics)
+
 attach(HedgeRSReturns.t)
+load("HedgeRS_EW.RData")
+
 
 ```
 
 ```{r data_setup, echo=FALSE}
 hedgeData<-HedgeRSReturns.t[,1:29]
-head(hedgeData)
+#head(hedgeData)
+#summary(hedgeData)
 
 cash<-HedgeRSReturns.t[,c(1,36)]
 cash$date<-as.Date(cash$date)
 cash.ts<-xts(cash[,-1],cash$date)
-head(cash.ts)
+summary(cash.ts)
 
 equity<-HedgeRSReturns.t[,c(1,30)]
 equity$date<-as.Date(equity$date)
 equity.ts<-xts(equity[,-1],equity$date)
-head(equity.ts)
+summary(equity.ts)
 
 #Select all 20 strategies
 hedgeData<-hedgeData %>% select(date,CTA_EW,GAA_EW,Global_Macro_EW,Insurance,
@@ -38,12 +42,12 @@ hedgeData<-hedgeData %>% select(date,CTA_EW,GAA_EW,Global_Macro_EW,Insurance,
                                 RV_Credit_EW,RV_FI_EW,FEMN_EW,QEMN_EW,Stat_Arb_EW,
                                 Struct_Credit_EW)
 
-head(hedgeData)
+summary(hedgeData)
 
 #convert to timeseries
 hedgeData$date<-as.Date(hedgeData$date)
 hedgeData.ts<-xts(hedgeData[,-1],hedgeData$date)
-head(hedgeData.ts)
+#head(hedgeData.ts)
 R<-hedgeData.ts
 N<-ncol(hedgeData.ts)
 
@@ -53,7 +57,7 @@ colnames(weights) = colnames(R)
 #weights
 
 #create portfolio returns
-#portfolioReturns<-Return.portfolio(R,rebalance_on = "quarters")
+portfolioReturns<-Return.portfolio(R,weights=weights,rebalance_on = "quarters")
 
 #portfolio results
 #table.Stats(portfolioReturns)
@@ -64,9 +68,8 @@ colnames(weights) = colnames(R)
 #ES(portfolioReturns,p=0.95)
 
 
-Return.annualized(portfolioReturns,geometric = TRUE)
-StdDev.annualized(portfolioReturns)
-
+#Return.annualized(portfolioReturns,geometric = TRUE)
+#StdDev.annualized(portfolioReturns)
 
 Return.annualized(portfolioReturns)
 StdDev.annualized(portfolioReturns)
@@ -93,7 +96,7 @@ weights
 #create portfolio returns
 portfolioReturns<-Return.portfolio(R,weights = weights,rebalance_on = "quarters")
 
-Return.annualized(portfolioReturns)
+Return.annualized(portfolioReturns,geometric = TRUE)
 StdDev.annualized(portfolioReturns)
 ES(portfolioReturns)
 cat('Skew',skewness(portfolioReturns))
@@ -120,10 +123,12 @@ riskParity.w
 
 weights = xts(t(riskParity.w), as.Date("2003-12-31"))
 
+
 #colnames(weights) = colnames(R)
 weights
 
-portfolioReturns<-Return.portfolio(R,weights = riskParity.w,rebalance_on = "quarters")
+portfolioReturns<-Return.portfolio(R,weights=weights,rebalance_on = "quarters",verbose=TRUE)
+portfolioReturns$BOP.Weight
 
 Return.annualized(portfolioReturns)
 StdDev.annualized(portfolioReturns)
@@ -142,8 +147,42 @@ table.Drawdowns(portfolioReturns)
 
 ```{r optimized_all}
 
-#MVO
-#cVaR
+returns<-R
+funds<-colnames(returns)
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.066/12)
+opt_mvo<-optimize.portfolio(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",trace=TRUE)
+
+opt_mvo
+
+names(opt_mvo)
+
+wMVO<-opt_mvo$weights
+wMVO
+
+weights = xts(t(wMVO), as.Date("2003-12-31"))
+
+#colnames(weights) = colnames(R)
+weights
+
+portfolioReturns<-Return.portfolio(R=R,weights = weights,rebalance_on = "none",verbose = TRUE)
+Return.annualized(portfolioReturns,geometric = TRUE,scale=12)
+Return.annualized(portfolioReturns,geometric = FALSE,scale=12)
+StdDev.annualized(portfolioReturns)
+ES(portfolioReturns)
+cat('Skew',skewness(portfolioReturns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
+SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
+table.Drawdowns(portfolioReturns)
 
 ```
 
