@@ -18,6 +18,32 @@ load("HedgeRS_EW.RData")
 attach(HedgeRSReturns.t)
 
 
+```
+
+```{r functions, echo=FALSE}
+
+#This calculates stress beta using APP_Equity
+stressbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = stress.t)
+    summary(fit)$coefficients[2]
+}
+##This calculates the beta
+beta<-function(x){
+  fit<-lm(x~APP_Equity,data=equity)
+  x<-summary(fit)$coefficients[2]
+}
+
+bullbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = bull.t)
+    summary(fit)$coefficients[2]
+}
+
+bearbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = bear.t)
+    summary(fit)$coefficients[2]
+}
+
+
 
 ```
 
@@ -165,19 +191,23 @@ portfolio<-add.constraint(portfolio = portfolio,type="box",
                           max=1)
 portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
 portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.066/12)
+
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
 opt_mvo<-optimize.portfolio(R=returns,portfolio=portfolio,
                             optimize_method = "ROI",trace=TRUE)
+
 
 opt_mvo
 
 weights<-opt_mvo$weights
-weights
+round(weights,3)
 
 MVO.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
 
 portfolioReturns<-Return.portfolio(R=R,weights = MVO.weights,rebalance_on = "quarters",verbose = TRUE)
 
-head(portfolioReturns$BOP.Weight)
+head(round(portfolioReturns$BOP.Weight,3))
 
 Return.annualized(portfolioReturns$returns,geometric = TRUE,scale=12)
 Return.annualized(portfolioReturns$returns,geometric = FALSE,scale=12)
@@ -192,6 +222,31 @@ cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
 table.Drawdowns(portfolioReturns$returns)
 
 ```
+```{r rolling_optimization}
+returns<-R
+funds<-colnames(returns)
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.066/12)
+
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+opt_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",rebalance_on = "months",training_period = 60)
+
+
+opt_rolling
+
+opt_rolling$portfolio
+opt_rolling$opt_rebalancing
+opt_rolling$weights
+
+```
+
 
 ```{r impact_of_changing_return}
 
@@ -199,6 +254,64 @@ table.Drawdowns(portfolioReturns$returns)
 ```
 
 ```{r cluster_MVO_level_1}
+#Create states
+
+
+z <- HedgeRSReturns.t$VIX #load VIX into z
+score <- (z-mean(z, na.rm = TRUE))/sd(z, na.rm = TRUE) #calculate z score
+
+Hedge_States<-cbind(hedgeData,score,APP_Equity)#add z score to the data.table
+
+Hedge_States$state<-"Central" #create new column based on score - named as state
+Hedge_States$state[score>=1]<-"High"
+Hedge_States$state[score<=1]<-"Low"
+##Create stressed subset
+stress.t<-Hedge_States %>%
+filter(state=="High")
+
+bull.t<-Hedge_States %>%
+  filter(APP_Equity>0)
+
+bear.t<-Hedge_States %>%
+  filter(APP_Equity<0)
+
+#Calculate the features
+
+HF_beta<-sapply(R,beta)
+HF_sd<-sapply(R,sd)*(12^0.5)
+HF_mean<-sapply(R,mean)*12
+HF_skew<-sapply(R,skewness)
+HF_kurt<-sapply(R,kurtosis)
+Sharpe<-(HF_mean-(mean(cash$Cash)*12))/HF_sd
+Treynor<-(HF_mean-(mean(cash$Cash)*12))/HF_beta
+Stress<-sapply(stress.t[,2:21],stressbeta)
+
+Bull_beta<-sapply(bull.t[,2:21], bullbeta)
+
+Bear_beta<-sapply(bear.t[,2:21], bearbeta)
+
+df_base<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Sharpe,Treynor,HF_beta,Stress,Bull_beta,Bear_beta)
+#df_base<-cbind(HF_mean,HF_sd)
+
+#HF_names<-c("CTA","EM GM","GAA","Global Macro","Insurance","L/S Asia Pac",
+#            "LS Emerging","LS Europe","LS Global","LS Japan","LS US",
+#            "Activist","Distressed","EM FI","Risk Arb","CB Arb",
+#            "RV Credit","RV FI","FEMN","QEMN","Stat Arb","Structured Credit",
+#            "Multi Event","Multi RV","Multi Diversifited","Multi Opportunistic")
+
+#row.names(df_base)<-HF_names
+df_base_round<-round(df_base,3)
+df_base_round
+df<-na.omit(df_base)
+df<-scale(df)
+
+#Calculate the clusters
+
+
+#risk parity in each cluster
+#optimize across the clusters
+
+
 
 
 ```
