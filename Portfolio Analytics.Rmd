@@ -13,10 +13,18 @@ library(tidyverse)
 library(tidyquant)
 library(riskParityPortfolio)
 library(PortfolioAnalytics)
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(dplyr)
+library(NbClust)
+library(pheatmap)
 
 load("HedgeRS_EW.RData")
 attach(HedgeRSReturns.t)
 
+HedgeRSReturns.t<-HedgeRSReturns.t%>%
+  filter(date>="2008-01-31")
 
 ```
 
@@ -242,8 +250,8 @@ opt_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio,
 opt_rolling
 
 opt_rolling$portfolio
-opt_rolling$opt_rebalancing
-opt_rolling$weights
+#opt_rolling$opt_rebalancing
+
 
 ```
 
@@ -259,6 +267,7 @@ opt_rolling$weights
 
 z <- HedgeRSReturns.t$VIX #load VIX into z
 score <- (z-mean(z, na.rm = TRUE))/sd(z, na.rm = TRUE) #calculate z score
+APP_Equity<-HedgeRSReturns.t$APP_Equity
 
 Hedge_States<-cbind(hedgeData,score,APP_Equity)#add z score to the data.table
 
@@ -302,13 +311,43 @@ df_base<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Sharpe,Treynor,HF_beta,Stress,Bull_
 #row.names(df_base)<-HF_names
 df_base_round<-round(df_base,3)
 df_base_round
-df<-na.omit(df_base)
+
+df_select<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Bear_beta)
+
+df<-na.omit(df_select)
 df<-scale(df)
+df
+
+heatmap(df,scale="row")
+pheatmap(df,cutree_rows = 8)
 
 #Calculate the clusters
 
+set.seed(1)
+distance<-get_dist(df,method="euclidean")
+fviz_dist(distance,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+fviz_nbclust(df,kmeans,method="wss")
+
+fviz_nbclust(df,kmeans,method="silhouette")
+
+gap_stat <- clusGap(df, FUN = kmeans, nstart = 25, d.power=1,
+                    K.max = 12, B = 300)
+fviz_gap_stat(gap_stat)
+
+k2<-kmeans(df,centers = 8,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+#Agglomerative clustering
+res.dist<-dist(df,method="euclidean")
+res.hc<-hclust(d=res.dist,method="ward.D2")
+fviz_dend(res.hc,ced=0.5)
+res.coph<-cophenetic(res.hc)
+cor(res.dist,res.coph)
 
 #risk parity in each cluster
+
+
 #optimize across the clusters
 
 
