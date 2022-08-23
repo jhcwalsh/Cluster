@@ -293,60 +293,71 @@ portfolio.results
 
 ```
 ```{r rolling_optimization}
+
 returns<-R
+short_returns<-returns['2011/'] #for equal weighting
 funds<-colnames(returns)
-target_return<-0.062
+
+#Equal weighted portfolio
+equal_weight<- rep(1/ncol(returns),ncol(returns))
+base_case<-Return.portfolio(R=short_returns,weights=equal_weight,rebalance_on = "years")
+colnames(base_case)<-"Equal Weighted"
+#table.AnnualizedReturns(base_case)
+
+#MVO portfolio
 portfolio<-portfolio.spec(assets=funds)
 portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
 portfolio<-add.constraint(portfolio = portfolio,type="box",
                           min=0,
                           max=1)
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
 #portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
-portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=return_target/12)
-
 portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
 
 opt_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio,
                             optimize_method = "ROI",rebalance_on = "years",
-                            training_period = 84,trace=TRUE)
+                            training_period = 84,rolling_period= 84,trace=TRUE)
 
-base_returns<-Return.portfolio(returns,extractWeights(opt_rolling))
-base_weight<-extractWeights(opt_rolling)
-round(base_weight,3)
-base_returns
-
-table.AnnualizedReturns(base_returns)
-
+MVO_returns<-Return.portfolio(returns,extractWeights(opt_rolling))
+MVO_weight<-extractWeights(opt_rolling)
+ret_summary<-cbind(base_case,MVO_returns)
+colnames(ret_summary)<-c("Equal Weighted","MVO")
+table.AnnualizedReturns(ret_summary)
+table.Drawdowns(base_case)
+table.Drawdowns(MVO_returns)
 chart.Weights(opt_rolling)
 
-opt_rolling
+#Optimization with risk budget
+portfolio.rb<-portfolio.spec(assets=funds)
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="full_investment")
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="long_only")
+portfolio.rb<-add.objective(portfolio=portfolio.rb,
+                            type="risk_budget",
+                            name="StdDev",
+                            min_prisk=0,
+                            max_prisk=0.25)
 
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+#portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
 
-#opt_rolling$opt_rebalancing
+set.seed(1)
+rb_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio.rb,
+                            optimize_method = "random",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
 
-#round(opt_rolling$opt_rebalancing$`2010-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2011-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2012-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2013-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2014-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2015-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2016-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2017-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2018-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2019-12-31`$weights,2)
-#round(opt_rolling$opt_rebalancing$`2020-12-31`$weights,2)
-
-#looks like I need to create a sequence of portfolios using each of the weights and then create a return stream that can then be analyzed
-
-
-#opt_rolling$portfolio$weight_seq[1,1]
-#opt_rolling$opt_rebalancing$`2012-12-31`
-#opt_rolling$opt_rebalancing$`2013-01-31`
-#opt_rolling$opt_rebalancing$`2020-01-31`
-#charts.PerformanceSummary(portfolioReturns$returns)
-
-
-
+risk_returns<-Return.portfolio(returns,extractWeights(rb_rolling))
+risk_weight<-extractWeights(rb_rolling)
+ret_summary<-cbind(base_case,MVO_returns,risk_returns)
+colnames(ret_summary)<-c("Equal Weighted","MVO","Risk Budget")
+table.AnnualizedReturns(ret_summary)
+table.CAPM(ret_summary,equity.ts)
+table.Stats(ret_summary)
+table.Drawdowns(risk_returns)
+ES(ret_summary)
+table.DownsideRisk(ret_summary)
+chart.Weights(rb_rolling)
+charts.PerformanceSummary(ret_summary)
 
 ```
 
