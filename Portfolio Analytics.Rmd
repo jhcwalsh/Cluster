@@ -593,6 +593,71 @@ print(portfolio.results)
 
 ```
 
+```{r cluster_backtest}
+
+returns<-R.cluster
+funds<-colnames(returns)
+
+#MVO portfolio
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+opt_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
+
+MVO_returns<-Return.portfolio(returns,extractWeights(opt_rolling))
+MVO_weight<-extractWeights(opt_rolling)
+
+chart.Weights(opt_rolling)
+
+#Optimization with risk budget
+portfolio.rb<-portfolio.spec(assets=funds)
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="full_investment")
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="long_only")
+portfolio.rb<-add.objective(portfolio=portfolio.rb,
+                            type="risk_budget",
+                            name="StdDev",
+                            min_prisk=0,
+                            max_prisk=0.35)
+
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+#portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+set.seed(1)
+rb_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio.rb,
+                            optimize_method = "random",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
+
+risk_returns<-Return.portfolio(returns,extractWeights(rb_rolling))
+risk_weight<-extractWeights(rb_rolling)
+
+ret_summary_2<-cbind(ret_summary,MVO_returns,risk_returns)
+colnames(ret_summary_2)<-c("Equal Weighted","MVO","Risk Budget","Cluster MVO","Cluster Risk Budget")
+table.AnnualizedReturns(ret_summary_2)
+table.CAPM(ret_summary_2,equity.ts)
+table.Stats(ret_summary_2)
+table.Drawdowns(risk_returns)
+ES(ret_summary_2)
+table.DownsideRisk(ret_summary_2)
+chart.Weights(rb_rolling)
+charts.PerformanceSummary(ret_summary_2)
+
+
+
+```
+
+
+
+
+
 ```{r cluster_corr}
 
 cols.cor<-cor(R,use="pairwise.complete.obs",method="pearson")
