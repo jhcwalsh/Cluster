@@ -1,0 +1,691 @@
+---
+title: "Portfolio Analytics"
+output: html_document
+date: '2022-08-09'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(PerformanceAnalytics)
+library(xts)
+library(tidyverse)
+library(tidyquant)
+library(riskParityPortfolio)
+library(PortfolioAnalytics)
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(dplyr)
+library(NbClust)
+library(pheatmap)
+
+load("HedgeRS_EW.RData")
+attach(HedgeRSReturns.t)
+
+HedgeRSReturns.t<-HedgeRSReturns.t%>%
+  filter(date>="2003-01-31")
+
+return_target<-0.062
+```
+
+```{r functions, echo=FALSE}
+
+#This calculates stress beta using APP_Equity
+stressbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = stress.t)
+    summary(fit)$coefficients[2]
+}
+##This calculates the beta
+beta<-function(x){
+  fit<-lm(x~APP_Equity,data=equity)
+  x<-summary(fit)$coefficients[2]
+}
+
+bullbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = bull.t)
+    summary(fit)$coefficients[2]
+}
+
+bearbeta<-function(x){
+    fit<-lm(x~APP_Equity,data = bear.t)
+    summary(fit)$coefficients[2]
+}
+
+
+
+```
+
+```{r data_setup, echo=FALSE}
+hedgeData<-HedgeRSReturns.t[,1:29]
+
+cash<-HedgeRSReturns.t[,c(1,36)]
+cash$date<-as.Date(cash$date)
+cash.ts<-xts(cash[,-1],cash$date)
+
+equity<-HedgeRSReturns.t[,c(1,30)]
+equity$date<-as.Date(equity$date)
+equity.ts<-xts(equity[,-1],equity$date)
+#summary(equity.ts)
+
+#Select all 20 strategies
+hedgeData<-hedgeData %>% select(date,CTA_EW,GAA_EW,Global_Macro_EW,Insurance,
+                                LS_AsiaPacific_EW,LS_Emerging_EW,LS_Europe_EW,LS_Japan_EW,LS_US_EW,
+                                Activist_EW,Distressed_EW,EM_FI_EW,Risk_Arb_EW,CB_Arb_EW,
+                                RV_Credit_EW,RV_FI_EW,FEMN_EW,QEMN_EW,Stat_Arb_EW,
+                                Struct_Credit_EW)
+
+#summary(hedgeData)
+
+#convert to timeseries
+hedgeData$date<-as.Date(hedgeData$date)
+hedgeData.ts<-xts(hedgeData[,-1],hedgeData$date)
+#head(hedgeData.ts)
+R<-hedgeData.ts
+N<-ncol(hedgeData.ts)
+
+#equally weighted - buy and hold
+#equal.weights.bh = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
+#colnames(equal.weights.bh) = colnames(R)
+
+#equal.weights<-as.vector(matrix(equal.weights.bh,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
+#weights
+
+#create portfolio returns
+#portfolioReturns<-Return.portfolio(R,weights=equal.weights.bh,rebalance_on = "quarters")
+
+#portfolio results
+#table.Stats(portfolioReturns)
+#table.AnnualizedReturns(portfolioReturns)
+#table.CalendarReturns(portfolioReturns)
+#table.Drawdowns(portfolioReturns)
+#table.Distributions(portfolioReturns)
+#ES(portfolioReturns,p=0.95)
+
+
+#Return.annualized(portfolioReturns,geometric = TRUE)
+#StdDev.annualized(portfolioReturns)
+
+#Return.annualized(portfolioReturns)
+#StdDev.annualized(portfolioReturns)
+#ES(portfolioReturns)
+#cat('Skew',skewness(portfolioReturns))
+#cat('Excess Kurtosis',kurtosis(portfolioReturns,method="excess"))
+#SharpeRatio.annualized(portfolioReturns,Rf=cash.ts)
+#cat('beta',CAPM.beta(portfolioReturns,equity.ts))
+#cat('bull beta',CAPM.beta.bull(portfolioReturns,equity.ts))
+#cat('bear beta',CAPM.beta.bear(portfolioReturns,equity.ts))
+#table.Drawdowns(portfolioReturns)
+#charts.PerformanceSummary(portfolioReturns)
+
+
+```
+
+## Equal Weighted, quarterly rebalancing
+
+```{r equal_weighted_all, echo=FALSE}
+
+
+#1/N weighting
+weights = xts(matrix(rep(1 / N, N), 1), as.Date("2003-12-31"))
+colnames(weights) = colnames(R)
+weights
+
+equal.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
+#create portfolio returns
+portfolioReturns<-Return.portfolio(R,weights = equal.weights,rebalance_on = "quarters",verbose = TRUE)
+
+#head(portfolioReturns$BOP.Weight)
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
+charts.PerformanceSummary(portfolioReturns$returns)
+
+portfolio.return<-Return.annualized(portfolioReturns$returns)[1]
+portfolio.sd<-StdDev.annualized(portfolioReturns$returns)[1]
+portfolio.ES<-ES(portfolioReturns$returns)[1]
+portfolio.skew<-skewness(portfolioReturns$returns)[1]
+portfolio.kurt<-kurtosis(portfolioReturns$returns,method="excess")[1]
+portfolio.sharpe<-SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)[1]
+portfolio.beta<-CAPM.beta(portfolioReturns$returns,equity.ts)[1]
+portfolio.bull<-CAPM.beta.bull(portfolioReturns$returns,equity.ts)[1]
+portfolio.bear<-CAPM.beta.bear(portfolioReturns$returns,equity.ts)[1]
+
+portfolio.results<-tibble("Equal Weighted",
+                          portfolio.return,portfolio.sd,portfolio.ES,portfolio.skew,
+                          portfolio.kurt,portfolio.sharpe,portfolio.beta,
+                          portfolio.bear,portfolio.bull)
+
+colnames(portfolio.results)<-c("Portfolio","Return","StDev","Expected Shortfall","Skew","Kurtosis",
+                               "Sharpe Ratio","Equity Beta","Bear Beta","Bull Beta")
+portfolio.results
+
+#equal risk contribution
+
+```
+
+## Risk Parity (equal risk weighted), quarterly rebalancing
+
+```{r riskParity,echo=FALSE}
+corR<-cor(R)
+riskParityPortfolio(corR)
+riskParity<-riskParityPortfolio(corR)
+riskParity.w<-riskParity$w
+
+round(riskParity.w,3)
+
+weights = xts(t(riskParity.w), as.Date("2003-12-31"))
+
+risk.parity.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
+#colnames(weights) = colnames(R)
+
+portfolioReturns<-Return.portfolio(R,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
+
+#head(portfolioReturns$BOP.Weight)
+
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE)
+Return.annualized(portfolioReturns$returns,geometric = FALSE)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
+charts.PerformanceSummary(portfolioReturns$returns)
+
+portfolio.return<-Return.annualized(portfolioReturns$returns)[1]
+portfolio.sd<-StdDev.annualized(portfolioReturns$returns)[1]
+portfolio.ES<-ES(portfolioReturns$returns)[1]
+portfolio.skew<-skewness(portfolioReturns$returns)[1]
+portfolio.kurt<-kurtosis(portfolioReturns$returns,method="excess")[1]
+portfolio.sharpe<-SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)[1]
+portfolio.beta<-CAPM.beta(portfolioReturns$returns,equity.ts)[1]
+portfolio.bull<-CAPM.beta.bull(portfolioReturns$returns,equity.ts)[1]
+portfolio.bear<-CAPM.beta.bear(portfolioReturns$returns,equity.ts)[1]
+
+portfolio.results<-portfolio.results %>%
+    add_row(Portfolio="Risk Parity",
+                          Return=portfolio.return,StDev=portfolio.sd,
+                          `Expected Shortfall`=portfolio.ES,Skew=portfolio.skew,
+                          Kurtosis=portfolio.kurt,`Sharpe Ratio`=portfolio.sharpe,
+                          `Equity Beta`=portfolio.beta,`Bear Beta`=portfolio.bear,
+                          `Bull Beta`=portfolio.bull)
+portfolio.results
+
+```
+
+## MVO, target return, quarterly rebalancing
+
+```{r optimized_all,echo=FALSE}
+
+returns<-R
+funds<-colnames(returns)
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=return_target/12)
+
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+opt_mvo<-optimize.portfolio(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",trace=TRUE)
+
+
+#opt_mvo
+
+weights<-opt_mvo$weights
+round(weights,3)
+
+MVO.weights<-as.vector(matrix(weights,ncol=20)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
+portfolioReturns<-Return.portfolio(R=R,weights = MVO.weights,rebalance_on = "quarters",verbose = TRUE)
+
+#head(round(portfolioReturns$BOP.Weight,3))
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE,scale=12)
+Return.annualized(portfolioReturns$returns,geometric = FALSE,scale=12)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
+charts.PerformanceSummary(portfolioReturns$returns)
+
+portfolio.return<-Return.annualized(portfolioReturns$returns)[1]
+portfolio.sd<-StdDev.annualized(portfolioReturns$returns)[1]
+portfolio.ES<-ES(portfolioReturns$returns)[1]
+portfolio.skew<-skewness(portfolioReturns$returns)[1]
+portfolio.kurt<-kurtosis(portfolioReturns$returns,method="excess")[1]
+portfolio.sharpe<-SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)[1]
+portfolio.beta<-CAPM.beta(portfolioReturns$returns,equity.ts)[1]
+portfolio.bull<-CAPM.beta.bull(portfolioReturns$returns,equity.ts)[1]
+portfolio.bear<-CAPM.beta.bear(portfolioReturns$returns,equity.ts)[1]
+
+portfolio.results<-portfolio.results %>%
+    add_row(Portfolio="MVO",
+                          Return=portfolio.return,StDev=portfolio.sd,
+                          `Expected Shortfall`=portfolio.ES,Skew=portfolio.skew,
+                          Kurtosis=portfolio.kurt,`Sharpe Ratio`=portfolio.sharpe,
+                          `Equity Beta`=portfolio.beta,`Bear Beta`=portfolio.bear,
+                          `Bull Beta`=portfolio.bull)
+portfolio.results
+
+```
+
+## Backtesting: MVO, 84-month training/rolling period
+
+```{r rolling_optimization,echo=FALSE,warning=FALSE}
+
+returns<-R
+short_returns<-returns['2011/'] #for equal weighting
+funds<-colnames(returns)
+
+#Equal weighted portfolio
+equal_weight<- rep(1/ncol(returns),ncol(returns))
+base_case<-Return.portfolio(R=short_returns,weights=equal_weight,rebalance_on = "years")
+colnames(base_case)<-"Equal Weighted"
+#table.AnnualizedReturns(base_case)
+
+#MVO portfolio
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+opt_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
+
+MVO_returns<-Return.portfolio(returns,extractWeights(opt_rolling))
+MVO_weight<-extractWeights(opt_rolling)
+ret_summary<-cbind(base_case,MVO_returns)
+colnames(ret_summary)<-c("Equal Weighted","MVO")
+table.AnnualizedReturns(ret_summary)
+table.Drawdowns(base_case)
+table.Drawdowns(MVO_returns)
+chart.Weights(opt_rolling)
+
+#Optimization with risk budget
+portfolio.rb<-portfolio.spec(assets=funds)
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="full_investment")
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="long_only")
+portfolio.rb<-add.objective(portfolio=portfolio.rb,
+                            type="risk_budget",
+                            name="CVaR",
+                            min_prisk=0,
+                            max_prisk=0.25)
+
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+#portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+set.seed(1)
+rb_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio.rb,
+                            optimize_method = "DEoptim",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
+
+risk_returns<-Return.portfolio(returns,extractWeights(rb_rolling))
+risk_weight<-extractWeights(rb_rolling)
+ret_summary<-cbind(base_case,MVO_returns,risk_returns)
+colnames(ret_summary)<-c("Equal Weighted","MVO","Risk Budget")
+table.AnnualizedReturns(ret_summary)
+table.CAPM(ret_summary,equity.ts)
+table.Stats(ret_summary)
+table.Drawdowns(risk_returns)
+ES(ret_summary)
+table.DownsideRisk(ret_summary)
+chart.Weights(rb_rolling)
+charts.PerformanceSummary(ret_summary)
+
+```
+
+```{r impact_of_changing_return}
+
+
+```
+
+## Clustering
+
+```{r cluster_MVO_level_1,echo=FALSE}
+#Create states
+
+
+z <- HedgeRSReturns.t$VIX #load VIX into z
+score <- (z-mean(z, na.rm = TRUE))/sd(z, na.rm = TRUE) #calculate z score
+APP_Equity<-HedgeRSReturns.t$APP_Equity
+
+Hedge_States<-cbind(hedgeData,score,APP_Equity)#add z score to the data.table
+
+Hedge_States$state<-"Central" #create new column based on score - named as state
+Hedge_States$state[score>=1]<-"High"
+Hedge_States$state[score<=1]<-"Low"
+##Create stressed subset
+stress.t<-Hedge_States %>%
+filter(state=="High")
+
+bull.t<-Hedge_States %>%
+  filter(APP_Equity>0)
+
+bear.t<-Hedge_States %>%
+  filter(APP_Equity<0)
+
+#Calculate the features
+
+HF_beta<-sapply(R,beta)
+HF_sd<-sapply(R,sd)*(12^0.5)
+HF_mean<-sapply(R,mean)*12
+HF_skew<-sapply(R,skewness)
+HF_kurt<-sapply(R,kurtosis)
+Sharpe<-(HF_mean-(mean(cash$Cash)*12))/HF_sd
+Treynor<-(HF_mean-(mean(cash$Cash)*12))/HF_beta
+Stress<-sapply(stress.t[,2:21],stressbeta)
+
+Bull_beta<-sapply(bull.t[,2:21], bullbeta)
+
+Bear_beta<-sapply(bear.t[,2:21], bearbeta)
+
+df_base<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Sharpe,Treynor,HF_beta,Stress,Bull_beta,Bear_beta)
+#df_base<-cbind(HF_mean,HF_sd)
+
+#HF_names<-c("CTA","EM GM","GAA","Global Macro","Insurance","L/S Asia Pac",
+#            "LS Emerging","LS Europe","LS Global","LS Japan","LS US",
+#            "Activist","Distressed","EM FI","Risk Arb","CB Arb",
+#            "RV Credit","RV FI","FEMN","QEMN","Stat Arb","Structured Credit",
+#            "Multi Event","Multi RV","Multi Diversifited","Multi Opportunistic")
+
+#row.names(df_base)<-HF_names
+df_base_round<-round(df_base,3)
+df_base_round
+
+df_select<-cbind(HF_mean,HF_sd,HF_skew,HF_kurt,Bear_beta)
+
+df<-na.omit(df_select)
+df<-scale(df)
+df
+
+heatmap(df,scale="row")
+pheatmap(df,cutree_rows = 8)
+
+#Calculate the clusters
+
+set.seed(1)
+distance<-get_dist(df,method="euclidean")
+fviz_dist(distance,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+fviz_nbclust(df,kmeans,method="wss")
+
+fviz_nbclust(df,kmeans,method="silhouette")
+
+gap_stat <- clusGap(df, FUN = kmeans, nstart = 25, d.power=1,
+                    K.max = 12, B = 300)
+fviz_gap_stat(gap_stat)
+
+k2<-kmeans(df,centers = 8,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+#Agglomerative clustering
+res.dist<-dist(df,method="euclidean")
+res.hc<-hclust(d=res.dist,method="ward.D2")
+fviz_dend(res.hc,ced=0.5)
+res.coph<-cophenetic(res.hc)
+cor(res.dist,res.coph)
+
+#create clusters
+cluster1<-R$Activist_EW
+cluster2<-R$Struct_Credit_EW
+cluster3<-cbind(R$Insurance,R$RV_FI_EW)
+cluster4<-R$CTA_EW
+cluster5<-cbind(R$GAA_EW,R$QEMN_EW,R$FEMN_EW,R$Global_Macro_EW,R$Stat_Arb_EW)
+cluster6<-cbind(R$EM_FI_EW,R$CB_Arb_EW)
+cluster7<-cbind(R$LS_Europe_EW,R$LS_Japan_EW,R$Risk_Arb_EW,R$RV_Credit_EW)
+cluster8<-cbind(R$LS_Emerging_EW,R$Distressed_EW,R$LS_AsiaPacific_EW,R$LS_US_EW)
+
+#risk parity cluster3
+cor3<-cor(cluster3)
+riskParity<-riskParityPortfolio(cor3)
+riskParity$w
+weights = xts(t(riskParity$w), as.Date("2003-12-31"))
+risk.parity.weights<-as.vector(matrix(weights,ncol=ncol(weights)))
+PortfolioReturns<-Return.portfolio(cluster3,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
+cluster3.returns<-PortfolioReturns$returns
+colnames(cluster3.returns) = "cluster3"
+head(cluster3.returns)
+
+#risk parity cluster5
+cor5<-cor(cluster5)
+riskParity<-riskParityPortfolio(cor5)
+riskParity$w
+weights = xts(t(riskParity$w), as.Date("2003-12-31"))
+risk.parity.weights<-as.vector(matrix(weights,ncol=ncol(weights)))
+PortfolioReturns<-Return.portfolio(cluster5,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
+cluster5.returns<-PortfolioReturns$returns
+colnames(cluster5.returns) = "cluster5"
+head(cluster5.returns)
+
+#risk parity cluster6
+cor6<-cor(cluster6)
+riskParity<-riskParityPortfolio(cor6)
+riskParity$w
+weights = xts(t(riskParity$w), as.Date("2003-12-31"))
+risk.parity.weights<-as.vector(matrix(weights,ncol=ncol(weights)))
+PortfolioReturns<-Return.portfolio(cluster6,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
+cluster6.returns<-PortfolioReturns$returns
+colnames(cluster6.returns) = "cluster6"
+head(cluster6.returns)
+
+#risk parity cluster7
+cor7<-cor(cluster7)
+riskParity<-riskParityPortfolio(cor7)
+riskParity$w
+weights = xts(t(riskParity$w), as.Date("2003-12-31"))
+risk.parity.weights<-as.vector(matrix(weights,ncol=ncol(weights)))
+PortfolioReturns<-Return.portfolio(cluster7,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
+cluster7.returns<-PortfolioReturns$returns
+colnames(cluster7.returns) = "cluster7"
+head(cluster7.returns)
+
+#risk parity cluster3
+cor8<-cor(cluster8)
+riskParity<-riskParityPortfolio(cor8)
+riskParity$w
+weights = xts(t(riskParity$w), as.Date("2003-12-31"))
+risk.parity.weights<-as.vector(matrix(weights,ncol=ncol(weights)))
+PortfolioReturns<-Return.portfolio(cluster8,weights=risk.parity.weights,rebalance_on="quarters",verbose = TRUE)
+cluster8.returns<-PortfolioReturns$returns
+colnames(cluster8.returns) = "cluster8"
+head(cluster8.returns)
+
+cluster1.returns<-cluster1
+colnames(cluster1.returns) = "cluster1"
+
+cluster2.returns<-cluster2
+colnames(cluster2.returns) = "cluster2"
+
+cluster4.returns<-cluster4
+colnames(cluster4.returns) = "cluster4"
+
+#optimize across the clusters
+
+R.cluster<-cbind(cluster1.returns,cluster2.returns,cluster3.returns,
+                 cluster4.returns,cluster5.returns,cluster6.returns,
+                 cluster7.returns,cluster8.returns)
+
+returns<-R.cluster
+funds<-colnames(returns)
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=return_target/12)
+
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+opt_mvo<-optimize.portfolio(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",trace=TRUE)
+
+
+opt_mvo
+
+weights<-opt_mvo$weights
+round(weights,3)
+
+MVO.weights<-as.vector(matrix(weights,ncol=8)) #USE w AS A VECTOR TO BE ABLE TO USE ON_REBALANCE COMMAND
+
+portfolioReturns<-Return.portfolio(R=R.cluster,weights = MVO.weights,rebalance_on = "quarters",verbose = TRUE)
+
+head(round(portfolioReturns$BOP.Weight,3))
+
+Return.annualized(portfolioReturns$returns,geometric = TRUE,scale=12)
+Return.annualized(portfolioReturns$returns,geometric = FALSE,scale=12)
+StdDev.annualized(portfolioReturns$returns)
+ES(portfolioReturns$returns)
+cat('Skew',skewness(portfolioReturns$returns))
+cat('Excess Kurtosis',kurtosis(portfolioReturns$returns,method="excess"))
+SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)
+cat('beta',CAPM.beta(portfolioReturns$returns,equity.ts))
+cat('bull beta',CAPM.beta.bull(portfolioReturns$returns,equity.ts))
+cat('bear beta',CAPM.beta.bear(portfolioReturns$returns,equity.ts))
+table.Drawdowns(portfolioReturns$returns)
+charts.PerformanceSummary(portfolioReturns$returns)
+
+
+portfolio.return<-Return.annualized(portfolioReturns$returns)[1]
+portfolio.sd<-StdDev.annualized(portfolioReturns$returns)[1]
+portfolio.ES<-ES(portfolioReturns$returns)[1]
+portfolio.skew<-skewness(portfolioReturns$returns)[1]
+portfolio.kurt<-kurtosis(portfolioReturns$returns,method="excess")[1]
+portfolio.sharpe<-SharpeRatio.annualized(portfolioReturns$returns,Rf=cash.ts)[1]
+portfolio.beta<-CAPM.beta(portfolioReturns$returns,equity.ts)[1]
+portfolio.bull<-CAPM.beta.bull(portfolioReturns$returns,equity.ts)[1]
+portfolio.bear<-CAPM.beta.bear(portfolioReturns$returns,equity.ts)[1]
+
+portfolio.results<-portfolio.results %>%
+    add_row(Portfolio="Clusters",
+                          Return=portfolio.return,StDev=portfolio.sd,
+                          `Expected Shortfall`=portfolio.ES,Skew=portfolio.skew,
+                          Kurtosis=portfolio.kurt,`Sharpe Ratio`=portfolio.sharpe,
+                          `Equity Beta`=portfolio.beta,`Bear Beta`=portfolio.bear,
+                          `Bull Beta`=portfolio.bull)
+print(portfolio.results)
+
+```
+
+## Cluster backtest
+
+```{r cluster_backtest, echo=FALSE,warning=FALSE}
+
+returns<-R.cluster
+funds<-colnames(returns)
+
+#MVO portfolio
+portfolio<-portfolio.spec(assets=funds)
+portfolio<-add.constraint(portfolio=portfolio,type="full_investment")
+portfolio<-add.constraint(portfolio = portfolio,type="box",
+                          min=0,
+                          max=1)
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+opt_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio,
+                            optimize_method = "ROI",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
+
+MVO_returns<-Return.portfolio(returns,extractWeights(opt_rolling))
+MVO_weight<-extractWeights(opt_rolling)
+
+chart.Weights(opt_rolling)
+
+#Optimization with risk budget
+portfolio.rb<-portfolio.spec(assets=funds)
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="full_investment")
+portfolio.rb<-add.constraint(portfolio=portfolio.rb,type="long_only")
+portfolio.rb<-add.objective(portfolio=portfolio.rb,
+                            type="risk_budget",
+                            name="StdDev",
+                            min_prisk=0,
+                            max_prisk=0.35)
+
+#portfolio<-add.constraint(portfolio=portfolio,type="return",return_target=0.053/12)
+#portfolio<-add.objective(portfolio=portfolio,type="return",name="mean")
+#portfolio <- add.objective(portfolio=portfolio, type="risk", name="StdDev")
+
+set.seed(1)
+rb_rolling<-optimize.portfolio.rebalancing(R=returns,portfolio=portfolio.rb,
+                            optimize_method = "random",rebalance_on = "years",
+                            training_period = 84,rolling_period= 84,trace=TRUE)
+
+risk_returns<-Return.portfolio(returns,extractWeights(rb_rolling))
+risk_weight<-extractWeights(rb_rolling)
+
+ret_summary_2<-cbind(ret_summary,MVO_returns,risk_returns)
+colnames(ret_summary_2)<-c("Equal Weighted","MVO","Risk Budget","Cluster MVO","Cluster Risk Budget")
+table.AnnualizedReturns(ret_summary_2)
+table.CAPM(ret_summary_2,equity.ts)
+table.Stats(ret_summary_2)
+table.Drawdowns(risk_returns)
+ES(ret_summary_2)
+table.DownsideRisk(ret_summary_2)
+chart.Weights(rb_rolling)
+charts.PerformanceSummary(ret_summary_2)
+
+
+
+```
+
+```{r cluster_corr}
+
+cols.cor<-cor(R,use="pairwise.complete.obs",method="pearson")
+cols.cor
+
+
+heatmap(df,scale="row")
+pheatmap(df,cutree_rows = 8)
+
+#Calculate the clusters
+
+set.seed(1)
+distance<-get_dist(df,method="euclidean")
+fviz_dist(distance,gradient=list(low="#00AFBB",mid="white",high="#FC4E07"))
+
+fviz_nbclust(df,kmeans,method="wss")
+
+fviz_nbclust(df,kmeans,method="silhouette")
+
+gap_stat <- clusGap(df, FUN = kmeans, nstart = 25, d.power=1,
+                    K.max = 12, B = 300)
+fviz_gap_stat(gap_stat)
+
+k2<-kmeans(df,centers = 8,nstart = 25)
+fviz_cluster(k2,data=df,main="K means")
+
+
+```
