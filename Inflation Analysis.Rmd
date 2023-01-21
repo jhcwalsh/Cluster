@@ -1,0 +1,127 @@
+---
+title: "Inflation"
+author: "JW"
+date: "6/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options('CombinedHarvesterCheckForUpdates' = TRUE)
+library(CombinedHarvester)
+library(tidyverse)
+library(tseries)
+library(fredr)
+library(moments)
+library(tidyquant)
+library(xlsx)
+
+##Tokens
+
+fredr_set_key("d80031904a0f06ff89e0dada3ccd6056")
+
+authWithToken("eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJqaGN3YWxzaCIsImNsaWVudElkIjoxOTEzLCJoZmRiUElkIjoxMjA5NSwiaXBBZGRyZXNzIjoiNjQuNDcuMTc4LjgyIiwiYXBwbGljYXRpb24iOjIsImFwcCI6IkNBU1RMRTIiLCJpc3MiOiJBbGJvdXJuZSIsImlhdCI6MTY2MjQ4NDcxMiwiZXhwIjoxNjYzNjk0MzEyfQ.yGbyj-3Z-umQyf2RQpSsJQMCtRQGPxbzYB_bxN5S6yyit8wU9zTEWvnHehRPK9DQEYYmIPIsmQAijr7kgWOKzA",
+              "eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJqaGN3YWxzaCIsImNsaWVudElkIjoxOTEzLCJoZmRiUElkIjoxMjA5NSwiaXBBZGRyZXNzIjoiNjQuNDcuMTc4LjgyIiwiYXBwbGljYXRpb24iOjIsImFwcCI6IkNBU1RMRTIiLCJpc3MiOiJBbGJvdXJuZSIsImlhdCI6MTY2MjQ4NDcxMiwiZXhwIjoxNjc4MjA5NTEyfQ.8ycuNzM1ieoGoWySUWs4cY-S9SCDQh1yC7sfDr7AEXQtQyOM-jn530cP4nR-kFAgonQAxijstbIFu0NEXqpdBQ")
+
+```
+
+ code chunk like this:
+
+```{r datadownload}
+start_date="2003-01-02"
+end_date="2022-04-30"
+
+data_series_TIPS<-getMarketIndexReturns(indexIds = 314,start_date,end_date,currency="USD")
+data_series_TIPS<-getMarketIndexReturns(indexIds = 314,start_date,end_date,currency="USD")
+
+data_seriest_test<-getMarketIndexReturns(4142,"2003-01-01",end_date,currency = "USD")
+
+dt<-unlist(data_series_TIPS$dates[[1]])
+return_data<-as.data.frame(dt)
+
+for (i in 1:nrow(data_series_TIPS)){
+    temp<-unlist(data_series_TIPS$returns[i])
+    return_data<-cbind(return_data,temp)
+}
+
+namesID<-c("date","TIPS")
+colnames(return_data)<-namesID
+return_data$date <- as.Date(as.POSIXct(return_data$date/1000, origin = "1970-01-01"))
+
+```
+
+```{r Freddata}
+fredr_set_key("d80031904a0f06ff89e0dada3ccd6056")
+T10Y<-fredr(series_id = "DGS10", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+CPI<-fredr(series_id = "CPIAUCSL", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+HY_Spread<-fredr(series_id = "BAMLH0A0HYM2", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+CCC_Spread<-fredr(series_id = "BAMLH0A3HYC", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+BREAKEVEN5Y<-fredr(series_id = "T5YIE", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+FIVEYEAR5Y<-fredr(series_id = "T5YIFR", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+BREAKEVEN10Y<-fredr(series_id = "T10YIE", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+SPX<-fredr(series_id = "SP500", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+NASDAQ<-fredr(series_id = "NASDAQCOM", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+VIX<-fredr(series_id = "VIXCLS", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+TIPS.YLD<-fredr(series_id = "DFII10", observation_start = as.Date(start_date),observation_end = as.Date(end_date),frequency = "m")
+
+
+```
+
+```{r calculations}
+CPI.c<-CPI$value/lag(CPI$value,12)-1
+CPI.d<-CPI.c-lag(CPI.c,1)
+CPI.d12<-CPI.c-lag(CPI.c,12)
+CPI.d12L<-lag(CPI.c,2)-lag(CPI.c,14)
+BE5Y.d<-BREAKEVEN5Y$value-lag(BREAKEVEN5Y$value,1)
+BE10Y.d<-BREAKEVEN10Y$value-lag(BREAKEVEN10Y$value,1)
+FIVEY5Y.d<-FIVEYEAR5Y$value-lag(FIVEYEAR5Y$value,1)
+TIPS.12<-rollapplyr(return_data$TIPS,12,function(x) prod(1+x)-1, fill=NA)
+
+all_data<-cbind(return_data,CPI.c,CPI.d,CPI.d12L,TIPS.12,TIPS.YLD$value/100,BE5Y.d,BE10Y.d,FIVEY5Y.d)
+colnames(all_data)<-c("date","TIPS","CPI.c","CPI.d","CPI.dL","TIPS.12","TIPS_YLD","BE5Y.d","BE10Y.d","FIVEY5Y.d")
+
+##Create states
+z <- all_data$TIPS_YLD #load VIX into z
+score <- (z-mean(z, na.rm = TRUE))/sd(z, na.rm = TRUE) #calculate z score
+
+all_data<-cbind(all_data,score)
+
+all_data$state<-"Central" #create new column based on score - named as state
+all_data$state[score>=1]<-"High"
+all_data$state[score<=-1]<-"Low"
+
+all_data$Yield<-"High/Normal" #create new column based on score - named as state
+all_data$Yield[score<=-1]<-"Low"
+
+file="C:/Local Drive/R/workspace/Inflation/Inflation_Spreadsheet.xlsx"
+write.xlsx(all_data,file)
+
+```
+
+```{r plots}
+ggplot(all_data,aes(date,TIPS.12))+geom_line()
+ggplot(all_data,aes(date,CPI.d))+geom_line()
+ggplot(all_data,aes(date,CPI.d12))+geom_line()
+ggplot(all_data,aes(TIPS.12,CPI.d12))+geom_point()+stat_smooth(method = lm)
+
+ggplot(all_data,aes(x=TIPS.12,y=CPI.d12,colour=Yield))+geom_point()+geom_smooth(method = lm)+
+labs(x = "10-year TIPS annual return, %", y = "Change in annual CPI inflation over 12-months") +ggtitle("TIPS returns and Change in Inflation")+
+            theme(plot.title=element_text(size = rel(1.5), lineheight = 0.9, hjust = 0.5)) +
+        scale_y_continuous(labels = scales::percent)+scale_x_continuous(labels = scales::percent)
+
+ggplot(all_data,aes(x=TIPS.12,y=CPI.d12,colour=state))+geom_point()+geom_smooth(method = lm)+
+labs(x = "10-year TIPS annual return, %", y = "Change in annual CPI inflation over 12-months") +ggtitle("TIPS returns and Change in Inflation")+
+            theme(plot.title=element_text(size = rel(1.5), lineheight = 0.9, hjust = 0.5)) +
+        scale_y_continuous(labels = scales::percent)+scale_x_continuous(labels = scales::percent)
+
+ggplot(all_data,aes(x=TIPS.12,y=lag(CPI.c,2)))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS.12,y=lag(CPI.d12,2)))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS,y=lag(CPI.d,2),colour=state))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS.12,y=lag(CPI.d12,2)))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS.12,y=lag(CPI.d12,2)))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS,y=lag(BE5Y.d)))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS,y=lag(BE10Y.d),colour=state))+geom_point()+geom_smooth(method = lm)
+ggplot(all_data,aes(x=TIPS,y=lag(FIVEY5Y.d),colour=state))+geom_point()+geom_smooth(method = lm)
+```
+
+
